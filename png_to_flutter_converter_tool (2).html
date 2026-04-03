@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>PNG → Flutter Converter (Compressed)</title>
+<style>
+  body { font-family: monospace; padding: 16px; }
+  canvas { border: 1px solid #ccc; display: block; margin-top: 10px; image-rendering: pixelated; }
+  textarea { width: 100%; height: 200px; margin-top: 10px; }
+  button { margin: 6px 6px 0 0; padding: 6px 14px; }
+</style>
+</head>
+<body>
+
+<h3>PNG → Flutter (Compressed Output)</h3>
+<input type="file" id="fileInput" accept="image/png">
+<br>
+<button onclick="generateFlutter()">Convert → Flutter</button>
+<button onclick="copyFlutter()">Copy Code</button>
+<button onclick="downloadFlutter()">Download .dart</button>
+
+<canvas id="canvas"></canvas>
+
+<textarea id="output"></textarea>
+
+<script>
+let imgData, width, height;
+
+const input = document.getElementById('fileInput');
+input.addEventListener('change', handleFile);
+
+function handleFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const img = new Image();
+  img.onload = () => {
+    width = img.width;
+    height = img.height;
+
+    const canvas = document.getElementById('canvas');
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+
+    imgData = ctx.getImageData(0, 0, width, height).data;
+  };
+
+  img.src = URL.createObjectURL(file);
+}
+
+// Run-Length Encoding compression
+function compressPixels(data) {
+  const result = [];
+
+  let prev = null;
+  let count = 0;
+
+  for (let i = 0; i < data.length; i += 4) {
+    const pixel = [data[i], data[i+1], data[i+2], data[i+3]];
+
+    if (prev && pixel.every((v, idx) => v === prev[idx])) {
+      count++;
+    } else {
+      if (prev) result.push([...prev, count]);
+      prev = pixel;
+      count = 1;
+    }
+  }
+
+  if (prev) result.push([...prev, count]);
+
+  return result;
+}
+
+function generateFlutter() {
+  if (!imgData) return alert('Upload PNG first');
+
+  const compressed = compressPixels(imgData);
+
+  const code = `import 'dart:typed_data';
+import 'dart:ui' as ui;
+import 'package:flutter/material.dart';
+
+class PixelImageWidget extends StatefulWidget {
+  final double scale;
+  const PixelImageWidget({super.key, this.scale = 1});
+
+  @override
+  State<PixelImageWidget> createState() => _PixelImageWidgetState();
+}
+
+class _PixelImageWidgetState extends State<PixelImageWidget> {
+  ui.Image? _image;
+
+  @override
+  void initState() {
+    super.initState();
+    _build();
+  }
+
+  Future<void> _build() async {
+    final bytes = _decode();
+
+    final completer = Completer<ui.Image>();
+    ui.decodeImageFromPixels(
+      bytes,
+      ${width},
+      ${height},
+      ui.PixelFormat.rgba8888,
+      (img) => completer.complete(img),
+    );
+
+    _image = await completer.future;
+    setState(() {});
+  }
+
+  Uint8List _decode() {
+    final d = Uint8List(${width} * ${height} * 4);
+
+    final data = [${compressed.map(c => c.join(',')).join(',')}];
+
+    int di = 0;
+
+    for (int i = 0; i < data.length; i += 5) {
+      final r = data[i];
+      final g = data[i+1];
+      final b = data[i+2];
+      final a = data[i+3];
+      final count = data[i+4];
+
+      // FAST fill (no addAll, no growable list)
+      for (int j = 0; j < count; j++) {
+        d[di++] = r;
+        d[di++] = g;
+        d[di++] = b;
+        d[di++] = a;
+      }
+    }
+
+    return d;
+  }];
+
+    for (int i = 0; i < data.length; i += 5) {
+      final r = data[i];
+      final g = data[i+1];
+      final b = data[i+2];
+      final a = data[i+3];
+      final count = data[i+4];
+
+      for (int j = 0; j < count; j++) {
+        d.addAll([r,g,b,a]);
+      }
+    }
+
+    return Uint8List.fromList(d);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_image == null) return const SizedBox();
+
+    return SizedBox(
+      width: ${width} * widget.scale,
+      height: ${height} * widget.scale,
+      child: CustomPaint(painter: _Painter(_image!)),
+    );
+  }
+}
+
+class _Painter extends CustomPainter {
+  final ui.Image img;
+  const _Painter(this.img);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..filterQuality = FilterQuality.none;
+
+    canvas.drawImageRect(
+      img,
+      Rect.fromLTWH(0, 0, ${width}, ${height}),
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}`;
+
+  document.getElementById('output').value = code;
+}
+
+function copyFlutter() {
+  const text = document.getElementById('output').value;
+  if (!text) return alert('Convert first');
+  navigator.clipboard.writeText(text);
+  alert('Copied!');
+}
+
+function downloadFlutter() {
+  const text = document.getElementById('output').value;
+  if (!text) return alert('Convert first');
+
+  const blob = new Blob([text], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'pixel_image_compressed.dart';
+  a.click();
+}
+</script>
+
+</body>
+</html>
